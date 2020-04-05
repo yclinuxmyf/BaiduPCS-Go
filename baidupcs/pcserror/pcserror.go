@@ -2,7 +2,7 @@
 package pcserror
 
 import (
-	"github.com/json-iterator/go"
+	"github.com/iikira/BaiduPCS-Go/pcsutil/jsonhelper"
 	"io"
 )
 
@@ -55,26 +55,24 @@ const (
 // DecodePCSJSONError 解析PCS JSON的错误
 func DecodePCSJSONError(opreation string, data io.Reader) Error {
 	errInfo := NewPCSErrorInfo(opreation)
-	return decodeJSONError(data, errInfo)
+	return HandleJSONParse(opreation, data, errInfo)
 }
 
 // DecodePanJSONError 解析Pan JSON的错误
 func DecodePanJSONError(opreation string, data io.Reader) Error {
 	errInfo := NewPanErrorInfo(opreation)
-	return decodeJSONError(data, errInfo)
+	return HandleJSONParse(opreation, data, errInfo)
 }
 
-func decodeJSONError(data io.Reader, errInfo Error) Error {
+// HandleJSONParse 处理解析json
+func HandleJSONParse(op string, data io.Reader, info interface{}) (pcsError Error) {
 	var (
-		d   = jsoniter.NewDecoder(data)
-		err error
+		err     = jsonhelper.UnmarshalData(data, info)
+		errInfo = info.(Error)
 	)
 
-	switch value := errInfo.(type) {
-	case *PCSErrInfo:
-		err = d.Decode(value)
-	case *PanErrorInfo:
-		err = d.Decode(value)
+	if errInfo == nil {
+		errInfo = NewPCSErrorInfo(op)
 	}
 
 	if err != nil {
@@ -82,6 +80,7 @@ func decodeJSONError(data io.Reader, errInfo Error) Error {
 		return errInfo
 	}
 
+	// 设置出错类型为远程错误
 	if errInfo.GetRemoteErrCode() != 0 {
 		errInfo.SetRemoteError()
 		return errInfo

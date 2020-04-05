@@ -79,7 +79,7 @@ type (
 
 	fdData struct {
 		*pcserror.PCSErrInfo
-		List []*FileDirectory
+		List FileDirectoryList
 	}
 
 	fdDataJSONExport struct {
@@ -101,13 +101,13 @@ var (
 		Order: OrderAsc,
 	}
 
-	DefaultOrderOptionsStr = fmt.Sprint(DefaultOrderOptions)
+	defaultOrderOptionsStr = fmt.Sprint(DefaultOrderOptions)
 )
 
 // FilesDirectoriesMeta 获取单个文件/目录的元信息
 func (pcs *BaiduPCS) FilesDirectoriesMeta(path string) (data *FileDirectory, pcsError pcserror.Error) {
 	if path == "" {
-		path = "/"
+		path = PathSeparator
 	}
 
 	fds, err := pcs.FilesDirectoriesBatchMeta(path)
@@ -142,12 +142,14 @@ func (pcs *BaiduPCS) FilesDirectoriesBatchMeta(paths ...string) (data FileDirect
 		PCSErrInfo: errInfo,
 	}
 
-	pcsError = handleJSONParse(OperationFilesDirectoriesMeta, dataReadCloser, (*fdDataJSONExport)(unsafe.Pointer(&jsonData)))
+	pcsError = pcserror.HandleJSONParse(OperationFilesDirectoriesMeta, dataReadCloser, (*fdDataJSONExport)(unsafe.Pointer(&jsonData)))
 	if pcsError != nil {
 		return
 	}
 
-	// 结果处理
+	// 修复MD5
+	jsonData.List.fixMD5()
+
 	data = jsonData.List
 	return
 }
@@ -165,25 +167,13 @@ func (pcs *BaiduPCS) FilesDirectoriesList(path string, options *OrderOptions) (d
 		PCSErrInfo: pcserror.NewPCSErrorInfo(OperationFilesDirectoriesList),
 	}
 
-	pcsError = handleJSONParse(OperationFilesDirectoriesList, dataReadCloser, (*fdDataJSONExport)(unsafe.Pointer(&jsonData)))
+	pcsError = pcserror.HandleJSONParse(OperationFilesDirectoriesList, dataReadCloser, (*fdDataJSONExport)(unsafe.Pointer(&jsonData)))
 	if pcsError != nil {
-		return
+		return nil, pcsError
 	}
 
-	// 可能是一个文件
-	if len(jsonData.List) == 0 {
-		var fd *FileDirectory
-		fd, pcsError = pcs.FilesDirectoriesMeta(path)
-		if pcsError != nil {
-			return
-		}
-
-		if fd.Isdir {
-			return
-		}
-
-		return FileDirectoryList{fd}, nil
-	}
+	// 修复MD5
+	jsonData.List.fixMD5()
 
 	data = jsonData.List
 	return
@@ -192,7 +182,7 @@ func (pcs *BaiduPCS) FilesDirectoriesList(path string, options *OrderOptions) (d
 // Search 按文件名搜索文件, 不支持查找目录
 func (pcs *BaiduPCS) Search(targetPath, keyword string, recursive bool) (fdl FileDirectoryList, pcsError pcserror.Error) {
 	if targetPath == "" {
-		targetPath = "/"
+		targetPath = PathSeparator
 	}
 
 	dataReadCloser, pcsError := pcs.PrepareSearch(targetPath, keyword, recursive)
@@ -207,12 +197,14 @@ func (pcs *BaiduPCS) Search(targetPath, keyword string, recursive bool) (fdl Fil
 		PCSErrInfo: errInfo,
 	}
 
-	pcsError = handleJSONParse(OperationSearch, dataReadCloser, (*fdDataJSONExport)(unsafe.Pointer(&jsonData)))
+	pcsError = pcserror.HandleJSONParse(OperationSearch, dataReadCloser, (*fdDataJSONExport)(unsafe.Pointer(&jsonData)))
 	if pcsError != nil {
 		return
 	}
 
-	// 结果处理
+	// 修复MD5
+	jsonData.List.fixMD5()
+
 	fdl = jsonData.List
 	return
 }
@@ -220,7 +212,7 @@ func (pcs *BaiduPCS) Search(targetPath, keyword string, recursive bool) (fdl Fil
 func (pcs *BaiduPCS) recurseList(path string, depth int, options *OrderOptions, handleFileDirectoryFunc HandleFileDirectoryFunc) (fdl FileDirectoryList, ok bool) {
 	fdl, pcsError := pcs.FilesDirectoriesList(path, options)
 	if pcsError != nil {
-		ok := handleFileDirectoryFunc(depth, path, nil, pcsError)
+		ok := handleFileDirectoryFunc(depth, path, nil, pcsError) // 传递错误
 		return nil, ok
 	}
 
@@ -245,8 +237,29 @@ func (pcs *BaiduPCS) recurseList(path string, depth int, options *OrderOptions, 
 
 // FilesDirectoriesRecurseList 递归获取目录下的文件和目录列表
 func (pcs *BaiduPCS) FilesDirectoriesRecurseList(path string, options *OrderOptions, handleFileDirectoryFunc HandleFileDirectoryFunc) (data FileDirectoryList) {
+	fd, pcsError := pcs.FilesDirectoriesMeta(path)
+	if pcsError != nil {
+		handleFileDirectoryFunc(0, path, nil, pcsError) // 传递错误
+		return nil
+	}
+
+	if !fd.Isdir { // 不是一个目录
+		handleFileDirectoryFunc(0, path, fd, nil)
+		return FileDirectoryList{fd}
+	}
+
 	data, _ = pcs.recurseList(path, 0, options, handleFileDirectoryFunc)
 	return data
+}
+
+// fixMD5 尝试修复MD5字段
+// 服务器返回的MD5字段不一定正确了, 即是BlockList只有一个md5
+// MD5字段使用BlockList中的md5
+func (f *FileDirectory) fixMD5() {
+	if len(f.BlockList) != 1 {
+		return
+	}
+	f.MD5 = f.BlockList[0]
 }
 
 func (f *FileDirectory) String() string {
@@ -289,6 +302,12 @@ func (f *FileDirectory) String() string {
 
 	tb.Render()
 	return builder.String()
+}
+
+func (fl FileDirectoryList) fixMD5() {
+	for _, v := range fl {
+		v.fixMD5()
+	}
 }
 
 // TotalSize 获取目录下文件的总大小

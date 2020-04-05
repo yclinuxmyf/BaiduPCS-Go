@@ -4,13 +4,13 @@ import (
 	"errors"
 	"github.com/iikira/BaiduPCS-Go/internal/pcsconfig"
 	"github.com/iikira/BaiduPCS-Go/pcsutil/checksum"
+	"github.com/iikira/BaiduPCS-Go/pcsutil/converter"
+	"github.com/iikira/BaiduPCS-Go/pcsutil/jsonhelper"
 	"github.com/iikira/BaiduPCS-Go/requester/uploader"
-	"github.com/json-iterator/go"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
-	"unsafe"
 )
 
 type (
@@ -48,8 +48,7 @@ func NewUploadingDatabase() (ud *UploadingDatabase, err error) {
 		return ud, nil
 	}
 
-	d := jsoniter.NewDecoder(file)
-	err = d.Decode(ud)
+	err = jsonhelper.UnmarshalData(file, ud)
 	if err != nil {
 		return nil, err
 	}
@@ -63,12 +62,12 @@ func (ud *UploadingDatabase) Save() error {
 		return errors.New("dataFile is nil")
 	}
 
+	ud.Timestamp = time.Now().Unix()
+
 	var (
 		builder = &strings.Builder{}
-		e       = jsoniter.NewEncoder(builder)
+		err     = jsonhelper.MarshalData(builder, ud)
 	)
-	ud.Timestamp = time.Now().Unix()
-	err := e.Encode(ud)
 	if err != nil {
 		panic(err)
 	}
@@ -79,7 +78,7 @@ func (ud *UploadingDatabase) Save() error {
 	}
 
 	str := builder.String()
-	_, err = ud.dataFile.WriteAt(*(*[]byte)(unsafe.Pointer(&str)), 0)
+	_, err = ud.dataFile.WriteAt(converter.ToBytes(str), 0)
 	if err != nil {
 		return err
 	}
@@ -98,7 +97,7 @@ func (ud *UploadingDatabase) UpdateUploading(meta *checksum.LocalFileMeta, state
 		if uploading.LocalFileMeta == nil {
 			continue
 		}
-		if uploading.LocalFileMeta.EqualLengthMD5(meta) || strings.Compare(uploading.LocalFileMeta.Path, meta.Path) == 0 {
+		if uploading.LocalFileMeta.EqualLengthMD5(meta) || uploading.LocalFileMeta.Path == meta.Path {
 			ud.UploadingList[k].State = state
 			return
 		}
@@ -125,7 +124,7 @@ func (ud *UploadingDatabase) Delete(meta *checksum.LocalFileMeta) bool {
 		if uploading.LocalFileMeta == nil {
 			continue
 		}
-		if uploading.LocalFileMeta.EqualLengthMD5(meta) || strings.Compare(uploading.LocalFileMeta.Path, meta.Path) == 0 {
+		if uploading.LocalFileMeta.EqualLengthMD5(meta) || uploading.LocalFileMeta.Path == meta.Path {
 			ud.deleteIndex(k)
 			return true
 		}
@@ -148,7 +147,7 @@ func (ud *UploadingDatabase) Search(meta *checksum.LocalFileMeta) *uploader.Inst
 		if uploading.LocalFileMeta.EqualLengthMD5(meta) {
 			return uploading.State
 		}
-		if strings.Compare(uploading.LocalFileMeta.Path, meta.Path) == 0 {
+		if uploading.LocalFileMeta.Path == meta.Path {
 			// 移除旧的信息
 			// 目前只是比较了文件大小
 			if meta.Length != uploading.LocalFileMeta.Length {
@@ -169,6 +168,10 @@ func (ud *UploadingDatabase) clearModTimeChange() {
 	for i := 0; i < len(ud.UploadingList); i++ {
 		uploading := ud.UploadingList[i]
 		if uploading.LocalFileMeta == nil {
+			continue
+		}
+
+		if uploading.ModTime == -1 { // 忽略
 			continue
 		}
 

@@ -3,11 +3,17 @@ package uploader
 
 import (
 	"github.com/iikira/BaiduPCS-Go/pcsutil"
+	"github.com/iikira/BaiduPCS-Go/pcsutil/converter"
 	"github.com/iikira/BaiduPCS-Go/pcsverbose"
 	"github.com/iikira/BaiduPCS-Go/requester"
 	"github.com/iikira/BaiduPCS-Go/requester/rio"
 	"net/http"
 	"time"
+)
+
+const (
+	// BufioReadSize bufio 缓冲区大小, 用于上传时读取文件
+	BufioReadSize = int(64 * converter.KB) // 64KB
 )
 
 type (
@@ -98,7 +104,7 @@ func (u *Uploader) execute() (resp *http.Response, code int, err error) {
 		header["Content-Type"] = u.contentType
 	}
 
-	resp, err = u.client.Req("POST", u.url, u.readed64, header)
+	resp, err = u.client.Req(http.MethodPost, u.url, u.readed64, header)
 	if err != nil {
 		return nil, 2, err
 	}

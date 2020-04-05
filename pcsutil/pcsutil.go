@@ -8,22 +8,8 @@ import (
 	"io/ioutil"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
 	"strings"
 )
-
-var (
-	// PipeInput 命令中是否为管道输入
-	PipeInput bool
-)
-
-func init() {
-	fileInfo, err := os.Stdin.Stat()
-	if err != nil {
-		return
-	}
-	PipeInput = (fileInfo.Mode() & os.ModeNamedPipe) == os.ModeNamedPipe
-}
 
 // TrimPathPrefix 去除目录的前缀
 func TrimPathPrefix(path, prefixPath string) string {
@@ -36,7 +22,7 @@ func TrimPathPrefix(path, prefixPath string) string {
 // ContainsString 检测字符串是否在字符串数组里
 func ContainsString(ss []string, s string) bool {
 	for k := range ss {
-		if strings.Compare(ss[k], s) == 0 {
+		if ss[k] == s {
 			return true
 		}
 	}
@@ -45,8 +31,8 @@ func ContainsString(ss []string, s string) bool {
 
 // GetURLCookieString 返回cookie字串
 func GetURLCookieString(urlString string, jar *cookiejar.Jar) string {
-	url, _ := url.Parse(urlString)
-	cookies := jar.Cookies(url)
+	u, _ := url.Parse(urlString)
+	cookies := jar.Cookies(u)
 	cookieString := ""
 	for _, v := range cookies {
 		cookieString += v.String() + "; "

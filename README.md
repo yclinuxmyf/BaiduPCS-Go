@@ -7,13 +7,6 @@
 
 This project was largely inspired by [GangZhuo/BaiduPCS](https://github.com/GangZhuo/BaiduPCS)
 
-## 解决错误代码4, No permission to do this operation
-```
-BaiduPCS-Go config set -appid 266719
-```
-
-详见讨论 [#387](https://github.com/iikira/BaiduPCS-Go/issues/387)
-
 ## 注意
 
 此文档只针对于最新的commit, 可能不适用于已发布的最新版本.
@@ -80,6 +73,7 @@ BaiduPCS-Go config set -appid 266719
   * [7. 退出程序](#7-退出程序)
 - [常见问题](#常见问题)
 - [TODO](#todo)
+- [相关文档](#相关文档)
 - [交流反馈](#交流反馈)
 - [捐助](#捐助)
 
@@ -355,16 +349,39 @@ BaiduPCS-Go d <网盘文件或目录的路径1> <文件或目录2> <文件或目
   --save          将下载的文件直接保存到当前工作目录
   --saveto value  将下载的文件直接保存到指定的目录
   -x              为文件加上执行权限, (windows系统无效)
-  --share         以分享文件的方式获取下载链接来下载
-  --locate        以获取直链的方式来下载
-  -p value        指定下载线程数
-```
+  --mode value    下载模式, 可选值: pcs, stream, locate, locate_pan, share, 默认为 locate, 相关说明见上面的帮助 (default: "locate")
+  -p value        指定下载线程数 (default: 0)
+  -l value        指定同时进行下载文件的数量 (default: 0)
+  --retry value   下载失败最大重试次数 (default: 3)
+  --nocheck       下载文件完成后不校验文件
 
-支持多个文件或目录的下载.
+```
 
 下载的文件默认保存到 **程序所在目录** 的 download/ 目录, 支持设置指定目录, 重名的文件会自动跳过!
 
+下载的文件默认保存到, **程序所在目录**的 **download/** 目录.
+
+通过 `BaiduPCS-Go config set -savedir <savedir>`, 自定义保存的目录.
+
+支持多个文件或目录下载.
+ 
+支持下载完成后自动校验文件, 但并不是所有的文件都支持校验!
+ 
+自动跳过下载重名的文件!
+
 [关于下载的简单说明](https://github.com/iikira/BaiduPCS-Go/wiki/%E5%85%B3%E4%BA%8E%E4%B8%8B%E8%BD%BD%E7%9A%84%E7%AE%80%E5%8D%95%E8%AF%B4%E6%98%8E)
+
+#### 下载模式说明
+
+* pcs: 通过百度网盘的 PCS API 下载
+
+* stream: 通过百度网盘的 PCS API, 以流式文件的方式下载, 效果同 pcs
+
+* locate: 默认的下载模式。从百度网盘 Android 客户端, 获取下载链接的方式来下载
+
+* locate_pan: 从百度网盘 WEB 首页获取下载链接来下载, 该下载方式需配合第三方服务器, 机密文件切勿使用此下载方式
+
+* share: 从网盘文件的分享列表获取文件的下载链接来下载
 
 #### 例子
 ```
@@ -429,9 +446,9 @@ BaiduPCS-Go locate <文件1> <文件2> ...
 
 #### 注意
 
-若该功能无法正常使用, 提示`user is not authorized, hitcode:101`, 尝试更换 User-Agent 为 `netdisk`:
+若该功能无法正常使用, 提示`user is not authorized, hitcode:xxx`, 尝试更换 User-Agent 为 `netdisk;2.2.51.6;netdisk;10.0.63;PC;android-android`:
 ```
-BaiduPCS-Go config set -user_agent "netdisk"
+BaiduPCS-Go config set -user_agent "netdisk;2.2.51.6;netdisk;10.0.63;PC;android-android"
 ```
 
 ## 手动秒传文件
@@ -446,13 +463,12 @@ BaiduPCS-Go ru -length=<文件的大小> -md5=<文件的md5值> -slicemd5=<文�
 
 遇到同名文件将会自动覆盖! 
 
+可能无法秒传 20GB 以上的文件!!
+
 #### 例子:
 ```
 # 如果秒传成功, 则保存到网盘路径 /test
 BaiduPCS-Go rapidupload -length=56276137 -md5=fbe082d80e90f90f0fb1f94adbbcfa7f -slicemd5=38c6a75b0ec4499271d4ea38a667ab61 -crc32=314332359 /test
-
-# 精简一下, 如果秒传成功, 则保存到网盘路径 /test
-BaiduPCS-Go rapidupload -length=56276137 -md5=fbe082d80e90f90f0fb1f94adbbcfa7f /test
 ```
 
 
@@ -473,6 +489,7 @@ BaiduPCS-Go fixmd5 <文件1> <文件2> <文件3> ...
 
 修复文件MD5的原理为秒传文件, 即修复文件MD5成功后, 文件的**创建日期, 修改日期, fs_id, 版本历史等信息**将会被覆盖, 修复的MD5值将覆盖原先的MD5值, 但不影响文件的完整性.
 
+注意: 无法修复 **20GB** 以上文件的 md5!!
 
 #### 例子:
 ```
@@ -503,6 +520,8 @@ BaiduPCS-Go ep <文件/目录1> <文件/目录2> ...
 导出网盘内的文件或目录, 原理为秒传文件, 此操作会生成导出文件或目录的命令.
 
 #### 注意
+
+**无法导出 20GB 以上的文件!!**
 
 **无法导出文件的版本历史等数据!!**
 
@@ -742,6 +761,12 @@ Windows: `%APPDATA%\BaiduPCS-Go`
 
 可通过设置环境变量 `BAIDUPCS_GO_CONFIG_DIR`, 指定配置文件存放的目录.
 
+谨慎修改 `appid`, `user_agent`, `pcs_ua`, `pan_ua` 的值, 否则访问网盘服务器时, 可能会出现错误.
+
+`cache_size` 的值支持可选设置单位了, 单位不区分大小写, `b` 和 `B` 均表示字节的意思, 如 `64KB`, `1MB`, `32kb`, `65536b`, `65536`.
+
+`max_upload_parallel`, `max_download_load` 的值支持可选设置单位了, 单位为每秒的传输速率, 后缀`/s` 可省略, 如 `2MB/s`, `2MB`, `2m`, `2mb` 均为一个意思.
+
 #### 例子
 ```
 # 显示所有可以设置的值
@@ -878,8 +903,9 @@ cli交互模式下, 运行命令 `config set -max_parallel 250` 将下载最大�
 
 # TODO
 
-1. 上传大文件;
-2. 回收站操作, 例如查询回收站文件, 还原文件或目录等.
+
+# 相关文档
+详见: https://github.com/iikira/BaiduPCS-Go/tree/master/docs
 
 # 交流反馈
 

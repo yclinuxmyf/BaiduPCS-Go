@@ -73,6 +73,8 @@ const (
 	OperationShareCancel = "取消分享"
 	// OperationShareList 列出分享列表
 	OperationShareList = "列出分享列表"
+	// OperationShareSURLInfo 获取分享详细信息
+	OperationShareSURLInfo = "获取分享详细信息"
 	// OperationRecycleList 列出回收站文件列表
 	OperationRecycleList = "列出回收站文件列表"
 	// OperationRecycleRestore 还原回收站文件或目录
@@ -82,6 +84,10 @@ const (
 	// OperationRecycleClear 清空回收站
 	OperationRecycleClear = "清空回收站"
 
+	// OperationExportFileInfo 导出文件信息
+	OperationExportFileInfo = "导出文件信息"
+	// OperationGetRapidUploadInfo 获取文件秒传信息
+	OperationGetRapidUploadInfo = "获取文件秒传信息"
 	// OperationFixMD5 修复文件md5
 	OperationFixMD5 = "修复文件md5"
 	// OperrationMatchPathByShellPattern 通配符匹配文件路径
@@ -91,10 +97,14 @@ const (
 	PCSBaiduCom = "pcs.baidu.com"
 	// PanBaiduCom 网盘首页api地址
 	PanBaiduCom = "pan.baidu.com"
+	// YunBaiduCom 网盘首页api地址2
+	YunBaiduCom = "yun.baidu.com"
 	// PanAppID 百度网盘appid
 	PanAppID = "250528"
 	// NetdiskUA 网盘客户端ua
-	NetdiskUA = "netdisk;8.12.9;;android-android;7.0;JSbridge3.0.0"
+	NetdiskUA = "netdisk;2.2.51.6;netdisk;10.0.63;PC;android-android"
+	// DotBaiduCom .baidu.com
+	DotBaiduCom = ".baidu.com"
 	// PathSeparator 路径分隔符
 	PathSeparator = "/"
 )
@@ -111,20 +121,20 @@ var (
 		Scheme: "http",
 		Host:   "baidupcs.com",
 	}
-
-	netdiskUAHeader = map[string]string{
-		"User-Agent": NetdiskUA,
-	}
 )
 
 type (
 	// BaiduPCS 百度 PCS API 详情
 	BaiduPCS struct {
-		appID    int                   // app_id
-		isHTTPS  bool                  // 是否启用https
-		client   *requester.HTTPClient // http 客户端
-		ph       *panhome.PanHome
-		cacheMap cachemap.CacheMap
+		appID      int                   // app_id
+		isHTTPS    bool                  // 是否启用https
+		uid        uint64                // 百度uid
+		client     *requester.HTTPClient // http 客户端
+		pcsUA      string
+		panUA      string
+		isSetPanUA bool
+		ph         *panhome.PanHome
+		cacheOpMap cachemap.CacheOpMap
 	}
 
 	userInfoJSON struct {
@@ -143,7 +153,7 @@ func NewPCS(appID int, bduss string) *BaiduPCS {
 		&http.Cookie{
 			Name:   "BDUSS",
 			Value:  bduss,
-			Domain: ".baidu.com",
+			Domain: DotBaiduCom,
 		},
 	})
 
@@ -171,7 +181,7 @@ func NewPCSWithCookieStr(appID int, cookieStr string) *BaiduPCS {
 
 	cookies := requester.ParseCookieStr(cookieStr)
 	for _, cookie := range cookies {
-		cookie.Domain = ".baidu.com"
+		cookie.Domain = DotBaiduCom
 	}
 
 	jar, _ := cookiejar.New(nil)
@@ -188,6 +198,9 @@ func (pcs *BaiduPCS) lazyInit() {
 	if pcs.ph == nil {
 		pcs.ph = panhome.NewPanHome(pcs.client)
 	}
+	if !pcs.isSetPanUA {
+		pcs.panUA = NetdiskUA
+	}
 }
 
 // GetClient 获取当前的http client
@@ -196,9 +209,29 @@ func (pcs *BaiduPCS) GetClient() *requester.HTTPClient {
 	return pcs.client
 }
 
+// GetBDUSS 获取BDUSS
+func (pcs *BaiduPCS) GetBDUSS() (bduss string) {
+	if pcs.client == nil || pcs.client.Jar == nil {
+		return ""
+	}
+	cookies := pcs.client.Jar.Cookies(baiduComURL)
+	for _, cookie := range cookies {
+		if cookie.Name == "BDUSS" {
+			return cookie.Value
+		}
+	}
+	return ""
+}
+
 // SetAPPID 设置app_id
 func (pcs *BaiduPCS) SetAPPID(appID int) {
 	pcs.appID = appID
+}
+
+// SetUID 设置百度UID
+// 只有locatedownload才需要设置此项
+func (pcs *BaiduPCS) SetUID(uid uint64) {
+	pcs.uid = uid
 }
 
 // SetStoken 设置stoken
@@ -212,14 +245,20 @@ func (pcs *BaiduPCS) SetStoken(stoken string) {
 		&http.Cookie{
 			Name:   "STOKEN",
 			Value:  stoken,
-			Domain: ".baidu.com",
+			Domain: DotBaiduCom,
 		},
 	})
 }
 
-// SetUserAgent 设置 User-Agent
-func (pcs *BaiduPCS) SetUserAgent(ua string) {
-	pcs.client.SetUserAgent(ua)
+// SetPCSUserAgent 设置 PCS User-Agent
+func (pcs *BaiduPCS) SetPCSUserAgent(ua string) {
+	pcs.pcsUA = ua
+}
+
+// SetPanUserAgent 设置 Pan User-Agent
+func (pcs *BaiduPCS) SetPanUserAgent(ua string) {
+	pcs.panUA = ua
+	pcs.isSetPanUA = true
 }
 
 // SetHTTPS 是否启用https连接
@@ -232,6 +271,12 @@ func (pcs *BaiduPCS) URL() *url.URL {
 	return &url.URL{
 		Scheme: GetHTTPScheme(pcs.isHTTPS),
 		Host:   PCSBaiduCom,
+	}
+}
+
+func (pcs *BaiduPCS) getPanUAHeader() (header map[string]string) {
+	return map[string]string{
+		"User-Agent": pcs.panUA,
 	}
 }
 
@@ -303,7 +348,7 @@ func (pcs *BaiduPCS) UK() (uk int64, pcsError pcserror.Error) {
 		PanErrorInfo: errInfo,
 	}
 
-	pcsError = handleJSONParse(OperationGetUK, dataReadCloser, &jsonData)
+	pcsError = pcserror.HandleJSONParse(OperationGetUK, dataReadCloser, &jsonData)
 	if pcsError != nil {
 		return
 	}

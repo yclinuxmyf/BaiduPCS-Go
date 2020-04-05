@@ -1,9 +1,18 @@
 package baidupcs
 
 import (
+	"errors"
 	"github.com/iikira/BaiduPCS-Go/baidupcs/pcserror"
+	"github.com/iikira/BaiduPCS-Go/pcsutil/converter"
 	"net/http"
 	"net/url"
+)
+
+var (
+	// ErrLocateDownloadURLNotFound 未找到下载链接
+	ErrLocateDownloadURLNotFound = errors.New("locatedownload url not found")
+	// MaxDownloadRangeSize 文件片段最大值
+	MaxDownloadRangeSize = 55 * converter.MB
 )
 
 type (
@@ -71,6 +80,20 @@ func (ui *URLInfo) SingleURL(https bool) *url.URL {
 	return u
 }
 
+// LastURL 返回最后一条下载链接
+func (ui *URLInfo) LastURL(https bool) *url.URL {
+	if len(ui.URLs) < 1 {
+		return nil
+	}
+
+	u, err := url.Parse(ui.URLs[len(ui.URLs)-1].URL)
+	if err != nil {
+		return nil
+	}
+	u.Scheme = GetHTTPScheme(https)
+	return u
+}
+
 // DownloadFile 下载单个文件
 func (pcs *BaiduPCS) DownloadFile(path string, downloadFunc DownloadFunc) (err error) {
 	pcs.lazyInit()
@@ -93,9 +116,9 @@ func (pcs *BaiduPCS) DownloadStreamFile(path string, downloadFunc DownloadFunc) 
 	return downloadFunc(pcsURL.String(), pcs.client.Jar)
 }
 
-// LocateDownloadWithUserAgent 获取下载链接, 可指定User-Agent
-func (pcs *BaiduPCS) LocateDownloadWithUserAgent(pcspath, ua string) (info *URLInfo, pcsError pcserror.Error) {
-	dataReadCloser, pcsError := pcs.prepareLocateDownload(pcspath, ua)
+// LocateDownloadWithUserAgent 获取下载链接
+func (pcs *BaiduPCS) LocateDownload(pcspath string) (info *URLInfo, pcsError pcserror.Error) {
+	dataReadCloser, pcsError := pcs.PrepareLocateDownload(pcspath)
 	if dataReadCloser != nil {
 		defer dataReadCloser.Close()
 	}
@@ -108,17 +131,12 @@ func (pcs *BaiduPCS) LocateDownloadWithUserAgent(pcspath, ua string) (info *URLI
 		PCSErrInfo: errInfo,
 	}
 
-	pcsError = handleJSONParse(OperationLocateDownload, dataReadCloser, &jsonData)
+	pcsError = pcserror.HandleJSONParse(OperationLocateDownload, dataReadCloser, &jsonData)
 	if pcsError != nil {
 		return
 	}
 
 	return &jsonData.URLInfo, nil
-}
-
-// LocateDownload 获取下载链接
-func (pcs *BaiduPCS) LocateDownload(pcspath string) (info *URLInfo, pcsError pcserror.Error) {
-	return pcs.LocateDownloadWithUserAgent(pcspath, "")
 }
 
 // LocatePanAPIDownload 从百度网盘首页获取下载链接
@@ -134,11 +152,13 @@ func (pcs *BaiduPCS) LocatePanAPIDownload(fidList ...int64) (dlinkInfoList APIDo
 	jsonData := panAPIDownloadJSON{
 		PanErrorInfo: pcserror.NewPanErrorInfo(OperationLocatePanAPIDownload),
 	}
-	pcsError = handleJSONParse(OperationLocatePanAPIDownload, dataReadCloser, &jsonData)
+	pcsError = pcserror.HandleJSONParse(OperationLocatePanAPIDownload, dataReadCloser, &jsonData)
 	if pcsError != nil {
 		if pcsError.GetErrType() == pcserror.ErrTypeRemoteError {
 			switch pcsError.GetRemoteErrCode() {
 			case 112: // 页面已过期
+				fallthrough
+			case 113: // 签名错误
 				pcs.ph.SetSignExpires() // 重置
 			}
 		}
